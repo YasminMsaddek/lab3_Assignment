@@ -1,0 +1,12 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: normalize_text
+display_name: Normalize Review Text
+type: command
+inputs:
+  input_data: {type: uri_folder}
+outputs:
+  output_data: {type: uri_folder}
+code: .
+command: >
+  python normalize.py --input_data ${{inputs.input_data}} --output_data ${{outputs.output_data}}
+environment: azureml:AzureML-sklearn-1.1-ubuntu20.04-py38-cpu@latest

@@ -1,0 +1,12 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: tfidf_extraction
+display_name: TF-IDF Feature Extraction
+type: command
+inputs:
+  train_data: {type: uri_folder}
+outputs:
+  output_data: {type: uri_folder}
+code: .
+command: >
+  python tfidf.py --train_data ${{inputs.train_data}} --output_data ${{outputs.output_data}}
+environment: azureml:AzureML-sklearn-1.1-ubuntu20.04-py38-cpu@latest

@@ -1,0 +1,51 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: Amazon_Electronics_Feature_Engineering
+description: Full pipeline to split, normalize, and extract features.
+
+settings:
+  default_compute: azureml:cpu-cluster
+
+inputs:
+  raw_data: 
+    type: uri_folder
+    path: azureml:amazon_electronics_features_v1_sampled:1
+
+jobs:
+  split_step:
+    type: command
+    component: azureml:split_dataset@latest
+    inputs:
+      data: ${{parent.inputs.raw_data}}
+
+  normalize_step:
+    type: command
+    component: azureml:normalize_text@latest
+    inputs:
+      input_data: ${{parent.jobs.split_step.outputs.train}}
+
+  length_step:
+    type: command
+    component: azureml:review_length@latest
+    inputs:
+      input_data: ${{parent.jobs.normalize_step.outputs.output_data}}
+
+  sentiment_step:
+    type: command
+    component: azureml:sentiment_analysis@latest
+    inputs:
+      input_data: ${{parent.jobs.normalize_step.outputs.output_data}}
+
+  tfidf_step:
+    type: command
+    component: azureml:tfidf_extraction@latest
+    inputs:
+      train_data: ${{parent.jobs.normalize_step.outputs.output_data}}
+
+  merge_step:
+    type: command
+    component: azureml:merge_features@latest
+    inputs:
+      sentiment_data: ${{parent.jobs.sentiment_step.outputs.output_data}}
+      length_data: ${{parent.jobs.length_step.outputs.output_data}}
+      tfidf_data: ${{parent.jobs.tfidf_step.outputs.output_data}}
