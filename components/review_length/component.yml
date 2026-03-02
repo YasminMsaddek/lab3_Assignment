@@ -1,0 +1,12 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: review_length
+display_name: Extract Review Length
+type: command
+inputs:
+  input_data: {type: uri_folder}
+outputs:
+  output_data: {type: uri_folder}
+code: .
+command: >
+  python length.py --input_data ${{inputs.input_data}} --output_data ${{outputs.output_data}}
+environment: azureml:AzureML-sklearn-1.1-ubuntu20.04-py38-cpu@latest

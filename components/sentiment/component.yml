@@ -1,0 +1,14 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: sentiment_analysis
+display_name: VADER Sentiment Analysis
+type: command
+inputs:
+  input_data: {type: uri_folder}
+outputs:
+  output_data: {type: uri_folder}
+code: .
+command: >
+  python sentiment.py --input_data ${{inputs.input_data}} --output_data ${{outputs.output_data}}
+environment:
+  conda_file: conda.yml
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04
