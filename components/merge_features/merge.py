@@ -2,26 +2,46 @@ import argparse
 import os
 import pandas as pd
 
+
+KEYS = ["asin", "reviewerID", "overall"]
+
+
+def resolve_parquet(path: str) -> str:
+    if os.path.isdir(path):
+        path = os.path.join(path, "data.parquet")
+    return path
+
+
+def load_df(path: str) -> pd.DataFrame:
+    return pd.read_parquet(resolve_parquet(path))
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sentiment_data", type=str, required=True)
-    parser.add_argument("--length_data", type=str, required=True)
-    parser.add_argument("--tfidf_data", type=str, required=True)
-    parser.add_argument("--output_data", type=str, required=True)
+    parser.add_argument("--length", type=str, required=True)
+    parser.add_argument("--sentiment", type=str, required=True)
+    parser.add_argument("--tfidf", type=str, required=True)
+    parser.add_argument("--embeddings", type=str, required=True)
+    parser.add_argument("--out", type=str, required=True)
     args = parser.parse_args()
 
-    # Load all parts
-    df_sent = pd.read_parquet(args.sentiment_data)
-    df_len = pd.read_parquet(args.length_data)
-    df_tfidf = pd.read_parquet(args.tfidf_data)
+    df_length = load_df(args.length)
+    df_sentiment = load_df(args.sentiment)
+    df_tfidf = load_df(args.tfidf)
+    df_embeddings = load_df(args.embeddings)
 
-    # Join on keys
-    # Note: We drop duplicate columns (like reviewText) from secondary dataframes before joining
-    merged_df = df_sent.merge(df_len.drop(columns=['reviewText']), on=['asin', 'reviewerID'])
-    merged_df = merged_df.merge(df_tfidf, on=['asin', 'reviewerID'])
+    df = df_length.merge(df_sentiment, on=KEYS, how="inner")
+    df = df.merge(df_tfidf, on=KEYS, how="inner")
+    df = df.merge(df_embeddings, on=KEYS, how="inner")
 
-    os.makedirs(args.output_data, exist_ok=True)
-    merged_df.to_parquet(os.path.join(args.output_data, "final_features.parquet"))
+    os.makedirs(args.out, exist_ok=True)
+    out_path = os.path.join(args.out, "data.parquet")
+    df.to_parquet(out_path, index=False)
+
+    print("Merged rows:", len(df))
+    print("Merged columns:", len(df.columns))
+    print(f"Saved merged features to {out_path}")
+
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,25 @@
+$schema: https://azuremlschemas.azureedge.net/latest/featureSetSpecification.schema.json
+
+source:
+  type: uri_folder
+  path: azureml://subscriptions/0b475409-9d7c-4dff-a07b-084eff651874/resourcegroups/rg-60305015/workspaces/Lab-60305015/datastores/workspaceblobstore/paths/azureml/ccf8c7e8-6b66-4e66-8a48-b91f86ad6c79/out/
+
+index_columns:
+  - name: asin
+    type: string
+  - name: reviewerID
+    type: string
+
+features:
+  - name: review_length_words
+    type: int64
+  - name: review_length_chars
+    type: int64
+  - name: sentiment_pos
+    type: double
+  - name: sentiment_neg
+    type: double
+  - name: sentiment_neu
+    type: double
+  - name: sentiment_compound
+    type: double

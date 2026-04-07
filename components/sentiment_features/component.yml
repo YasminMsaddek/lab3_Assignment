@@ -1,7 +1,7 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
 
-name: normalize_text
-display_name: Normalize Review Text
+name: sentiment_features
+display_name: Sentiment Features
 type: command
 
 inputs:
@@ -15,8 +15,10 @@ outputs:
 code: .
 
 command: >
-  python normalize.py
+  python sentiment.py
   --data ${{inputs.data}}
   --out ${{outputs.out}}
 
-environment: azureml:AzureML-sklearn-1.1-ubuntu20.04-py38-cpu@latest
+environment:
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04
+  conda_file: conda.yml

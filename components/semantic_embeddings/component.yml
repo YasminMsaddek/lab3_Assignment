@@ -1,7 +1,8 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
 
-name: normalize_text
-display_name: Normalize Review Text
+name: semantic_embeddings
+display_name: Semantic Embedding Features
+version: 2
 type: command
 
 inputs:
@@ -15,8 +16,10 @@ outputs:
 code: .
 
 command: >
-  python normalize.py
+  python embeddings.py
   --data ${{inputs.data}}
   --out ${{outputs.out}}
 
-environment: azureml:AzureML-sklearn-1.1-ubuntu20.04-py38-cpu@latest
+environment:
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04
+  conda_file: conda.yml

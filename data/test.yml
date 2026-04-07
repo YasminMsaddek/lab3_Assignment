@@ -1,0 +1,6 @@
+$schema: https://azuremlschemas.azureedge.net/latest/data.schema.json
+name: amazon_review_merged_features_test
+version: 1
+type: uri_folder
+path: azureml://subscriptions/0b475409-9d7c-4dff-a07b-084eff651874/resourcegroups/rg-60301437/workspaces/Amazon-Electronics-Lab-60301437/datastores/blobkey/paths/features_v1_sampled/
+description: Test dataset
