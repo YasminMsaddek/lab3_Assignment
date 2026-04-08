@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--val_data", type=str, required=True)
     parser.add_argument("--test_data", type=str, required=True)
     parser.add_argument("--output", type=str, required=True)
-    parser.add_argument("--solver", type=str, default='liblinear') # Match default for sweep
+    parser.add_argument("--solver", type=str, default='liblinear') 
     return parser.parse_args()
 
 def resolve_parquet_path(path: str) -> str:
@@ -33,16 +33,12 @@ def resolve_parquet_path(path: str) -> str:
         parquet_path = os.path.join(path, "data.parquet")
     else:
         parquet_path = path
-    if not os.path.exists(parquet_path):
-        raise FileNotFoundError(f"Could not find parquet file at: {parquet_path}")
     return parquet_path
 
 def load_data(path: str) -> pd.DataFrame:
     return pd.read_parquet(resolve_parquet_path(path))
 
 def create_labels(df: pd.DataFrame) -> pd.DataFrame:
-    if "overall" not in df.columns:
-        raise RuntimeError(f"Column 'overall' is missing.")
     out = df.copy()
     out["label"] = (out["overall"] >= 4).astype(int)
     return out
@@ -52,10 +48,7 @@ def expand_list_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in list(out.columns):
         series = out[col]
         non_null = series.dropna()
-        if non_null.empty:
-            continue
-        sample = non_null.iloc[0]
-        if isinstance(sample, (list, tuple)):
+        if not non_null.empty and isinstance(non_null.iloc[0], (list, tuple)):
             expanded = pd.DataFrame(series.tolist(), index=out.index)
             expanded.columns = [f"{col}_{i}" for i in range(expanded.shape[1])]
             out = out.drop(columns=[col]).join(expanded)
@@ -81,58 +74,45 @@ def evaluate(model, X, y, split: str):
         f"{split}_auc": roc_auc_score(y, probs),
     }
     mlflow.log_metrics(metrics)
-    print(f"{split} metrics: {metrics}")
 
 def main():
     args = parse_args()
-    start_time = time.time()
-
     with mlflow.start_run():
         mlflow.log_param("C", args.C)
         mlflow.log_param("solver", args.solver)
 
-        # Process Train
+        # Process Train and clear memory
         train_df = create_labels(load_data(args.train_data))
         X_train = build_features(train_df)
         y_train = train_df["label"]
         feature_columns = X_train.columns.tolist()
         del train_df
-        gc.collect() # Free memory after building X_train
+        gc.collect() 
 
-        # Process Val
+        # Process Val and clear memory
         val_df = create_labels(load_data(args.val_data))
         X_val = build_features(val_df, feature_columns)
         y_val = val_df["label"]
         del val_df
-        gc.collect() # Free memory after building X_val
+        gc.collect()
 
-        # Process Test
+        # Process Test and clear memory
         test_df = create_labels(load_data(args.test_data))
         X_test = build_features(test_df, feature_columns)
         y_test = test_df["label"]
         del test_df
-        gc.collect() # Free memory after building X_test
+        gc.collect()
 
-        print(f"Training on {X_train.shape[1]} features...")
-        model = LogisticRegression(
-            C=args.C,
-            max_iter=args.max_iter,
-            solver=args.solver, # Dynamic solver for sweep
-            random_state=42,
-        )
+        model = LogisticRegression(C=args.C, max_iter=args.max_iter, solver=args.solver, random_state=42)
         model.fit(X_train, y_train)
 
         evaluate(model, X_train, y_train, "train")
         evaluate(model, X_val, y_val, "val")
         evaluate(model, X_test, y_test, "test")
 
-        # Save artifacts
         os.makedirs(args.output, exist_ok=True)
-        model_path = os.path.join(args.output, "model.pkl")
-        joblib.dump({"model": model, "feature_columns": feature_columns}, model_path)
-        mlflow.log_artifact(model_path)
-        
-        print(f"Total runtime: {time.time() - start_time:.2f}s")
+        joblib.dump({"model": model, "feature_columns": feature_columns}, os.path.join(args.output, "model.pkl"))
+        mlflow.log_artifact(os.path.join(args.output, "model.pkl"))
 
 if __name__ == "__main__":
     main()
