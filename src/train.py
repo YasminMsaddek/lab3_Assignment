@@ -4,10 +4,10 @@ import time
 import joblib
 import mlflow
 import pandas as pd
-import gc  # Added for memory management
+import gc
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 DROP_COLS = {
     "asin", "reviewerID", "overall", "label",
@@ -28,18 +28,20 @@ def parse_args():
     parser.add_argument("--solver", type=str, default='liblinear') 
     return parser.parse_args()
 
-def load_data(path: str) -> pd.DataFrame:
-    # Resolve parquet path if it's a directory
+def load_data(path: str, sample_frac=1.0) -> pd.DataFrame:
     target = os.path.join(path, "data.parquet") if os.path.isdir(path) else path
-    return pd.read_parquet(target)
+    df = pd.read_parquet(target)
+    if sample_frac < 1.0:
+        df = df.sample(frac=sample_frac, random_state=42)
+    return df
 
-def process_split(path: str, ref_cols=None):
-    """Loads, labels, and expands features for a split, then returns X and y."""
-    df = load_data(path)
+def process_split(path: str, sample_frac=1.0, ref_cols=None):
+    """Loads, downsamples, and expands features to save RAM."""
+    df = load_data(path, sample_frac)
     df["label"] = (df["overall"] >= 4).astype(int)
     y = df["label"].values
     
-    # Expand list columns
+    # Expand lists (SBERT vectors)
     for col in list(df.columns):
         series = df[col]
         non_null = series.dropna()
@@ -48,11 +50,10 @@ def process_split(path: str, ref_cols=None):
             expanded.columns = [f"{col}_{i}" for i in range(expanded.shape[1])]
             df = df.drop(columns=[col]).join(expanded)
     
-    # Drop text and select numeric
+    # Filter to numeric only
     df = df.drop(columns=[c for c in DROP_COLS if c in df.columns], errors="ignore")
     df = df.select_dtypes(include=["number", "bool"]).astype(float).fillna(0)
     
-    # Align columns if reference columns provided
     if ref_cols is not None:
         for col in ref_cols:
             if col not in df.columns:
@@ -60,13 +61,10 @@ def process_split(path: str, ref_cols=None):
         df = df[list(ref_cols)]
     
     X = df.copy()
-    feature_names = X.columns.tolist()
-    
-    # CRITICAL: Clean up the intermediate dataframe
+    f_names = X.columns.tolist()
     del df
     gc.collect()
-    
-    return X, y, feature_names
+    return X, y, f_names
 
 def main():
     args = parse_args()
@@ -74,26 +72,26 @@ def main():
         mlflow.log_param("C", args.C)
         mlflow.log_param("solver", args.solver)
 
-        print("Processing Training data...")
-        X_train, y_train, feature_columns = process_split(args.train_data)
+        # Downsample train significantly to fit in 14GB RAM
+        print("Processing Training data (30% sample)...")
+        X_train, y_train, feature_columns = process_split(args.train_data, sample_frac=0.3)
 
         print("Processing Validation data...")
-        X_val, y_val, _ = process_split(args.val_data, ref_cols=feature_columns)
+        X_val, y_val, _ = process_split(args.val_data, sample_frac=1.0, ref_cols=feature_columns)
 
         print("Processing Test data...")
-        X_test, y_test, _ = process_split(args.test_data, ref_cols=feature_columns)
+        X_test, y_test, _ = process_split(args.test_data, sample_frac=1.0, ref_cols=feature_columns)
 
-        print(f"Training Logistic Regression (C={args.C}, solver={args.solver})...")
+        print(f"Training Logistic Regression (Rows: {len(X_train)})...")
         model = LogisticRegression(C=args.C, max_iter=args.max_iter, solver=args.solver, random_state=42)
         model.fit(X_train, y_train)
 
-        # Evaluate and log
-        for name, X, y in [("val", X_val, y_val), ("test", X_test, y_test)]:
-            acc = accuracy_score(y, model.predict(X))
-            mlflow.log_metric(f"{name}_accuracy", acc)
-            print(f"{name}_accuracy: {acc}")
+        # Metrics
+        val_acc = accuracy_score(y_val, model.predict(X_val))
+        mlflow.log_metric("val_accuracy", val_acc)
+        print(f"val_accuracy: {val_acc}")
 
-        # Save
+        # Save artifacts
         os.makedirs(args.output, exist_ok=True)
         joblib.dump({"model": model, "feature_columns": feature_columns}, os.path.join(args.output, "model.pkl"))
         mlflow.log_artifact(os.path.join(args.output, "model.pkl"))
