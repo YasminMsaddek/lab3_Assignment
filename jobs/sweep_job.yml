@@ -50,4 +50,4 @@ search_space:
 
 limits:
   max_total_trials: 6
-  max_concurrent_trials: 2
+  max_concurrent_trials: 1
