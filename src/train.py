@@ -2,12 +2,13 @@ import argparse
 import os
 import joblib
 import mlflow
+import mlflow.sklearn
 import pandas as pd
 import gc
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-# Columns to drop to save memory
+# Constant for columns that should not be used as features
 DROP_COLS = {
     "asin", "reviewerID", "overall", "label",
     "reviewText", "reviewText_x", "reviewText_y",
@@ -28,33 +29,37 @@ def parse_args():
     return parser.parse_args()
 
 def process_split(path: str, sample_frac=1.0, ref_cols=None):
+    """
+    Loads Parquet data and processes list-columns (SBERT/TF-IDF) 
+    efficiently to avoid SIGKILL.
+    """
     target = os.path.join(path, "data.parquet") if os.path.isdir(path) else path
     df = pd.read_parquet(target)
     
-    # 1. Downsample to fit in 7GB-14GB RAM
+    # Downsample to stay within RAM limits of the compute cluster
     if sample_frac < 1.0:
         df = df.sample(frac=sample_frac, random_state=42)
     
-    # 2. Create Target
+    # Create binary label for sentiment
     df["label"] = (df["overall"] >= 4).astype(int)
     y = df["label"].values
     
-    # 3. Efficient List Expansion (SBERT/TF-IDF)
+    # Expand list columns (like SBERT embeddings) into individual columns
     for col in list(df.columns):
         if not df[col].empty and isinstance(df[col].iloc[0], (list, tuple)):
-            # Expand to new dataframe
+            print(f"Expanding feature column: {col}")
             expanded = pd.DataFrame(df[col].tolist(), index=df.index)
             expanded.columns = [f"{col}_{i}" for i in range(expanded.shape[1])]
-            # Drop original list immediately to free RAM
+            # Join and immediately delete the original list to save memory
             df = df.drop(columns=[col]).join(expanded)
             del expanded
             gc.collect() 
     
-    # 4. Clean up non-numeric data
+    # Drop non-numeric metadata
     df = df.drop(columns=[c for c in DROP_COLS if c in df.columns], errors="ignore")
     df = df.select_dtypes(include=["number", "bool"]).astype(float).fillna(0)
     
-    # 5. Feature Alignment (Crucial for Inference)
+    # Ensure consistency between Train/Val/Test sets
     if ref_cols is not None:
         for col in ref_cols:
             if col not in df.columns:
@@ -69,30 +74,45 @@ def process_split(path: str, sample_frac=1.0, ref_cols=None):
 
 def main():
     args = parse_args()
+    
+    # MLflow setup - Azure ML handles the Tracking URI automatically
+    mlflow.sklearn.autolog() 
+    
     with mlflow.start_run():
-        mlflow.log_param("C", args.C)
-        mlflow.log_param("solver", args.solver)
-        
-        # Use 20% - 30% sample to prevent SIGKILL in DevOps Pipeline
-        print("Loading Training data...")
+        print(f"Hyperparameters: C={args.C}, max_iter={args.max_iter}")
+
+        # Use 30% sample to prevent Out of Memory on Standard_DS2_v2 / DS3_v2
+        print("Processing Training data...")
         X_train, y_train, feature_columns = process_split(args.train_data, sample_frac=0.3)
 
-        print("Loading Validation data...")
+        print("Processing Validation data...")
         X_val, y_val, _ = process_split(args.val_data, ref_cols=feature_columns)
 
-        print(f"Training Model with {len(feature_columns)} features...")
-        model = LogisticRegression(C=args.C, max_iter=args.max_iter, solver=args.solver)
+        print(f"Training Logistic Regression with {len(feature_columns)} features...")
+        model = LogisticRegression(
+            C=args.C, 
+            max_iter=args.max_iter, 
+            solver=args.solver, 
+            random_state=42
+        )
         model.fit(X_train, y_train)
 
-        # Logging Metrics for Step VI
+        # Log specific metrics for the Assignment requirements
         y_pred = model.predict(X_val)
         acc = accuracy_score(y_val, y_pred)
         mlflow.log_metric("val_accuracy", acc)
         print(f"Validation Accuracy: {acc}")
         
-        # Save output for Step VII
+        # Save the model and the feature list to the output directory
+        # This is required for Step VII (Deployment) to ensure score.py 
+        # knows which columns to expect.
         os.makedirs(args.output, exist_ok=True)
-        joblib.dump({"model": model, "feature_columns": feature_columns}, os.path.join(args.output, "model.pkl"))
+        model_payload = {
+            "model": model,
+            "feature_columns": feature_columns
+        }
+        joblib.dump(model_payload, os.path.join(args.output, "model.pkl"))
+        print(f"Model and feature metadata saved to {args.output}")
 
 if __name__ == "__main__":
     main()

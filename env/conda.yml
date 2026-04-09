@@ -6,10 +6,10 @@ dependencies:
   - pip
   - pip:
     - azureml-defaults
-    - inference-schema
+    - azureml-mlflow  
+    - mlflow>=2.0.0
     - joblib
     - pandas
     - scikit-learn==1.2.2
     - pyarrow
-    - mlflow
     - numpy<2.0.0
