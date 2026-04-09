@@ -1,14 +1,13 @@
 import argparse
 import os
-import time
 import joblib
 import mlflow
 import pandas as pd
 import gc
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
 
+# Columns to drop to save memory
 DROP_COLS = {
     "asin", "reviewerID", "overall", "label",
     "reviewText", "reviewText_x", "reviewText_y",
@@ -28,32 +27,34 @@ def parse_args():
     parser.add_argument("--solver", type=str, default='liblinear') 
     return parser.parse_args()
 
-def load_data(path: str, sample_frac=1.0) -> pd.DataFrame:
+def process_split(path: str, sample_frac=1.0, ref_cols=None):
     target = os.path.join(path, "data.parquet") if os.path.isdir(path) else path
     df = pd.read_parquet(target)
+    
+    # 1. Downsample to fit in 7GB-14GB RAM
     if sample_frac < 1.0:
         df = df.sample(frac=sample_frac, random_state=42)
-    return df
-
-def process_split(path: str, sample_frac=1.0, ref_cols=None):
-    """Loads, downsamples, and expands features to save RAM."""
-    df = load_data(path, sample_frac)
+    
+    # 2. Create Target
     df["label"] = (df["overall"] >= 4).astype(int)
     y = df["label"].values
     
-    # Expand lists (SBERT vectors)
+    # 3. Efficient List Expansion (SBERT/TF-IDF)
     for col in list(df.columns):
-        series = df[col]
-        non_null = series.dropna()
-        if not non_null.empty and isinstance(non_null.iloc[0], (list, tuple)):
-            expanded = pd.DataFrame(series.tolist(), index=df.index)
+        if not df[col].empty and isinstance(df[col].iloc[0], (list, tuple)):
+            # Expand to new dataframe
+            expanded = pd.DataFrame(df[col].tolist(), index=df.index)
             expanded.columns = [f"{col}_{i}" for i in range(expanded.shape[1])]
+            # Drop original list immediately to free RAM
             df = df.drop(columns=[col]).join(expanded)
+            del expanded
+            gc.collect() 
     
-    # Filter to numeric only
+    # 4. Clean up non-numeric data
     df = df.drop(columns=[c for c in DROP_COLS if c in df.columns], errors="ignore")
     df = df.select_dtypes(include=["number", "bool"]).astype(float).fillna(0)
     
+    # 5. Feature Alignment (Crucial for Inference)
     if ref_cols is not None:
         for col in ref_cols:
             if col not in df.columns:
@@ -71,30 +72,27 @@ def main():
     with mlflow.start_run():
         mlflow.log_param("C", args.C)
         mlflow.log_param("solver", args.solver)
-
-        # Downsample train significantly to fit in 14GB RAM
-        print("Processing Training data (30% sample)...")
+        
+        # Use 20% - 30% sample to prevent SIGKILL in DevOps Pipeline
+        print("Loading Training data...")
         X_train, y_train, feature_columns = process_split(args.train_data, sample_frac=0.3)
 
-        print("Processing Validation data...")
-        X_val, y_val, _ = process_split(args.val_data, sample_frac=1.0, ref_cols=feature_columns)
+        print("Loading Validation data...")
+        X_val, y_val, _ = process_split(args.val_data, ref_cols=feature_columns)
 
-        print("Processing Test data...")
-        X_test, y_test, _ = process_split(args.test_data, sample_frac=1.0, ref_cols=feature_columns)
-
-        print(f"Training Logistic Regression (Rows: {len(X_train)})...")
-        model = LogisticRegression(C=args.C, max_iter=args.max_iter, solver=args.solver, random_state=42)
+        print(f"Training Model with {len(feature_columns)} features...")
+        model = LogisticRegression(C=args.C, max_iter=args.max_iter, solver=args.solver)
         model.fit(X_train, y_train)
 
-        # Metrics
-        val_acc = accuracy_score(y_val, model.predict(X_val))
-        mlflow.log_metric("val_accuracy", val_acc)
-        print(f"val_accuracy: {val_acc}")
-
-        # Save artifacts
+        # Logging Metrics for Step VI
+        y_pred = model.predict(X_val)
+        acc = accuracy_score(y_val, y_pred)
+        mlflow.log_metric("val_accuracy", acc)
+        print(f"Validation Accuracy: {acc}")
+        
+        # Save output for Step VII
         os.makedirs(args.output, exist_ok=True)
         joblib.dump({"model": model, "feature_columns": feature_columns}, os.path.join(args.output, "model.pkl"))
-        mlflow.log_artifact(os.path.join(args.output, "model.pkl"))
 
 if __name__ == "__main__":
     main()

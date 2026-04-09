@@ -1,15 +1,15 @@
-name: amazon-review-training-env
+name: model_env
 channels:
   - conda-forge
 dependencies:
-  - python=3.9
+  - python=3.8
   - pip
   - pip:
-      - pandas
-      - numpy
-      - scikit-learn
-      - scipy
-      - pyarrow
-      - joblib
-      - mlflow
-      - azureml-mlflow
+    - azureml-defaults
+    - inference-schema
+    - joblib
+    - pandas
+    - scikit-learn==1.2.2
+    - pyarrow
+    - mlflow
+    - numpy<2.0.0
